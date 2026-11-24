@@ -10,12 +10,14 @@ Repo: github.com/arielangeles/convert. Local: `~/code/personal/convert`.
 ./scripts/build.sh               # build, ad-hoc sign, install to ~/Applications, register Finder service
 ./scripts/build.sh --no-install  # build only, output in build/Convert.app
 UNIVERSAL=1 VERSION=1.2.0 BUILD_NUMBER=7 ./scripts/build.sh --no-install   # what CI does
+./scripts/test.sh                # unit tests; extra args go to swift test (--filter X)
 ```
 
 - SwiftPM executable target, macOS 13+, Swift 5 language mode. The script assembles the .app bundle by hand (no Xcode project).
 - The owner's Mac has **Command Line Tools only, no full Xcode**. That shapes the code:
   - **Do not use SwiftUI macros** (`@State`, `@Observable`, `#Preview`, `@Entry`). Their plugin (`SwiftUIMacros`) ships only with Xcode, so the build fails with "external macro implementation type could not be found". Keep view state in `ConversionModel` as `@Published` properties instead.
   - `UNIVERSAL=1` (arm64 + x86_64) needs full Xcode; it works in CI, not on the owner's Mac.
+  - Tests use **Swift Testing** (`import Testing`, `@Test`, `#expect`), not XCTest: XCTest ships only with Xcode. Run them through `scripts/test.sh`, which passes `-plugin-path .../host/plugins/testing` on CLT. Without it the default build system can fail with "plugin for module 'TestingMacros' not found" (it did on 2026-11-24 after first working). `--build-system native` is worse: "no such module 'Testing'".
 - The two `ld: warning: search path ... not found` lines on local builds are harmless CLT noise.
 - `build.sh` runs under macOS `/bin/bash` 3.2 locally: no associative arrays, guard empty-array expansion under `set -u` with `${arr[@]+"${arr[@]}"}`, and wrap a variable in braces when non-ASCII text follows it (`${INSTALL_DIR}…`; the owner's shell is not UTF-8, and `$INSTALL_DIR…` broke once).
 - ffmpeg (Homebrew) is required at runtime for audio, video and WebP. `ToolLocator` checks `/opt/homebrew/bin`, `/usr/local/bin`, `~/.homebrew/bin`, then a login shell, because GUI apps don't inherit PATH.
@@ -32,8 +34,13 @@ UNIVERSAL=1 VERSION=1.2.0 BUILD_NUMBER=7 ./scripts/build.sh --no-install   # wha
 | `Sources/Convert/ProcessRunner.swift` | Async `Process` wrapper: stdout line streaming, stderr tail for errors, terminate on Task cancellation |
 | `Resources/Info.plist` | Bundle id `dev.ariel.convert`, `NSServices` (menu item "Convert…", `NSRequiredContext` so it's on by default), document types at `Alternate` rank |
 | `scripts/build.sh` | Build, assemble, sign, install, register (`lsregister`, `pbs -update`) |
-| `.github/workflows/ci.yml` | Universal build + bundle checks on push to main and PRs (macos-15) |
-| `.github/workflows/release.yml` | On `vX.Y.Z` tags or manual dispatch: build universal, stamp version, verify, `ditto` zip, `gh release` with SHA-256 |
+| `scripts/test.sh` | `swift test` with the CLT plugin-path workaround |
+| `Tests/ConvertTests/` | Swift Testing suites. `TestSupport.swift` has `TempDir` (self-deleting), `png()` fixture, `format(id)` lookup |
+| `.github/workflows/ci.yml` | Tests, universal build + bundle checks on push to main and PRs (macos-15) |
+| `.github/workflows/release.yml` | On `vX.Y.Z` tags or manual dispatch: test, build universal, stamp version, verify, `ditto` zip (versioned + fixed `Convert-macOS-universal.zip`), provenance attestation, `gh release` with SHA-256 |
+| `.github/workflows/security.yml` | actionlint + shellcheck, zizmor, CodeQL (Swift on macos-15, Actions on ubuntu) on PRs, main and weekly |
+| `.github/workflows/scorecard.yml` | OpenSSF Scorecard, results to code scanning |
+| `INSTALL.md` | End-user install guide, also written for AI assistants to follow. Keep its commands in sync with `release.yml` asset names |
 
 ## Invariants (keep these)
 
@@ -45,10 +52,11 @@ UNIVERSAL=1 VERSION=1.2.0 BUILD_NUMBER=7 ./scripts/build.sh --no-install   # wha
 
 ## Verifying changes
 
-There are no unit tests yet. To check by hand: build, put sample files in `build/verify/` (git-ignored), right-click › Convert… in Finder, then check the outputs (`file`, `ffprobe`, open the PDF). If the menu item is missing, run `/System/Library/CoreServices/pbs -update` or enable it under System Settings › Keyboard › Keyboard Shortcuts › Services.
+Run `./scripts/test.sh`. New logic gets a test; engine tests write into a `TempDir` and must not need ffmpeg (CI has none). For UI and Finder behaviour, check by hand: build, put sample files in `build/verify/` (git-ignored), right-click › Convert… in Finder, then check the outputs (`file`, `ffprobe`, open the PDF). If the menu item is missing, run `/System/Library/CoreServices/pbs -update` or enable it under System Settings › Keyboard › Keyboard Shortcuts › Services.
 
 ## Conventions
 
 - Commits: imperative subject, short body explaining why.
 - Branch for changes and open a PR; CI must be green before merging to main.
+- Workflows: pin every action to a full commit SHA with a `# vX.Y.Z` comment, `permissions: {}` at the top and per-job grants, `persist-credentials: false` on checkout, and pass `${{ }}` values to `run:` through `env:`. zizmor and actionlint enforce most of this.
 - No em dashes in docs or release notes (owner preference).
