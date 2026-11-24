@@ -1,0 +1,17 @@
+# Keeps the SHA-pinned GitHub Actions up to date. The app has no Swift package
+# dependencies, so Actions are the only ecosystem to watch.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait a week before proposing a new release, so a compromised or yanked version
+    # has time to be caught upstream first.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
