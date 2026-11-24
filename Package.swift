@@ -8,6 +8,12 @@ let package = Package(
         .executableTarget(
             name: "Convert",
             path: "Sources/Convert"
-        )
+        ),
+        // Swift Testing (not XCTest): it ships with Command Line Tools, XCTest needs full Xcode.
+        .testTarget(
+            name: "ConvertTests",
+            dependencies: ["Convert"],
+            path: "Tests/ConvertTests"
+        ),
     ]
 )
