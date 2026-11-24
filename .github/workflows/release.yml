@@ -12,8 +12,7 @@ on:
         description: "Existing tag to (re)publish, e.g. v1.0.0"
         required: true
 
-permissions:
-  contents: write # create the release and upload assets
+permissions: {}
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -24,6 +23,10 @@ jobs:
     name: Build and publish
     runs-on: macos-15
     timeout-minutes: 30
+    permissions:
+      contents: write     # create the release and upload assets
+      id-token: write     # sign the build provenance attestation
+      attestations: write # store the attestation
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
@@ -33,19 +36,23 @@ jobs:
             echo "::error::Tag '$TAG' is not semver (expected vX.Y.Z)"; exit 1
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.TAG }}
+          persist-credentials: false
 
       - name: Toolchain
         run: |
           xcodebuild -version
           swift --version
 
+      - name: Unit tests
+        run: ./scripts/test.sh
+
       - name: Build universal app
-        run: |
-          VERSION="${TAG#v}" BUILD_NUMBER="${{ github.run_number }}" UNIVERSAL=1 \
-            ./scripts/build.sh --no-install
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: VERSION="${TAG#v}" UNIVERSAL=1 ./scripts/build.sh --no-install
 
       - name: Verify bundle
         run: |
@@ -62,23 +69,40 @@ jobs:
         run: |
           set -euo pipefail
           ZIP="Convert-${TAG}-macOS-universal.zip"
+          # Same bytes under a fixed name, so releases/latest/download/Convert-macOS-universal.zip
+          # always works (INSTALL.md relies on it).
+          LATEST="Convert-macOS-universal.zip"
           # ditto keeps the bundle's symlinks, permissions and signature intact (plain zip can break them).
           ditto -c -k --sequesterRsrc --keepParent build/Convert.app "$ZIP"
+          cp "$ZIP" "$LATEST"
           shasum -a 256 "$ZIP" > "$ZIP.sha256"
-          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          shasum -a 256 "$LATEST" > "$LATEST.sha256"
+          {
+            echo "ZIP=$ZIP"
+            echo "LATEST=$LATEST"
+          } >> "$GITHUB_ENV"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            Convert-*-macOS-universal.zip
+            Convert-macOS-universal.zip
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          ASSETS=("$ZIP" "$ZIP.sha256" "$LATEST" "$LATEST.sha256")
           PRERELEASE=()
           [[ "$TAG" == *-* ]] && PRERELEASE=(--prerelease)
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG exists, replacing assets."
-            gh release upload "$TAG" "$ZIP" "$ZIP.sha256" --clobber
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
           else
-            gh release create "$TAG" "$ZIP" "$ZIP.sha256" \
+            gh release create "$TAG" "${ASSETS[@]}" \
               --title "Convert ${TAG}" \
               --notes-file .github/release-notes.md \
               --generate-notes \
