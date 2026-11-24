@@ -11,6 +11,20 @@ brew install ffmpeg          # needed for audio, video and WebP
 
 Requires macOS 13+ and Xcode Command Line Tools (`xcode-select --install`). Full Xcode is not needed; the code avoids SwiftUI macros like `@State` because their plugin only ships with Xcode.
 
+## Releases
+
+Download the latest universal build (Apple Silicon + Intel) from [Releases](../../releases). Install notes are in each release.
+
+Releases are built by GitHub Actions on a macOS runner. To cut one:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+`.github/workflows/release.yml` builds a universal binary, stamps the tag's version into `Info.plist`, verifies the bundle, zips it with `ditto` and publishes the zip plus a SHA-256 checksum. `ci.yml` builds every push to `main` and every PR.
+
+The app is ad-hoc signed, not notarized; see the release notes for the one-time Gatekeeper step.
+
 ## Engines
 
 | Input | Engine | Outputs |

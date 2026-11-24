@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (universal)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build app bundle
+        run: UNIVERSAL=1 ./scripts/build.sh --no-install
+
+      - name: Verify bundle
+        run: |
+          set -euo pipefail
+          APP=build/Convert.app
+          lipo -archs "$APP/Contents/MacOS/Convert"
+          codesign --verify --deep --strict "$APP"
+          plutil -lint "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :NSServices:0:NSMessage" "$APP/Contents/Info.plist"
