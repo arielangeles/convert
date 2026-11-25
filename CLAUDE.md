@@ -21,6 +21,7 @@ UNIVERSAL=1 VERSION=1.2.0 BUILD_NUMBER=7 ./scripts/build.sh --no-install   # wha
 - The two `ld: warning: search path ... not found` lines on local builds are harmless CLT noise.
 - `build.sh` runs under macOS `/bin/bash` 3.2 locally: no associative arrays, guard empty-array expansion under `set -u` with `${arr[@]+"${arr[@]}"}`, and wrap a variable in braces when non-ASCII text follows it (`${INSTALL_DIR}…`; the owner's shell is not UTF-8, and `$INSTALL_DIR…` broke once).
 - ffmpeg (Homebrew) is required at runtime for audio, video and WebP. `ToolLocator` checks `/opt/homebrew/bin`, `/usr/local/bin`, `~/.homebrew/bin`, then a login shell, because GUI apps don't inherit PATH.
+- Homebrew's ffmpeg (9.x) is built **without libvorbis and libwebp**. OGG falls back to ffmpeg's native `vorbis` encoder (experimental, stereo only) via `FFmpeg.encoders()`. WebP output currently has no working encoder on such a Mac (ImageIO can't write WebP on macOS 27 either).
 
 ## Layout
 
@@ -31,7 +32,7 @@ UNIVERSAL=1 VERSION=1.2.0 BUILD_NUMBER=7 ./scripts/build.sh --no-install   # wha
 | `Sources/Convert/ConversionModel.swift` | Batch state, folder expansion, TaskGroup with bounded concurrency (2 for audio/video, 4 otherwise), aggregated progress, cancel |
 | `Sources/Convert/Converter.swift` | Engines: `FFmpeg` (audio/video, progress via `-progress pipe:1` and ffprobe duration), `ImageConverter` (ImageIO in-process, WebP via ffmpeg), `DocumentConverter` (`@MainActor`, NSAttributedString, PDF via NSPrintOperation), `Markdown` (small block renderer), `PDFConverter` (PDFKit) |
 | `Sources/Convert/Formats.swift` | Output format catalog, input classification by extension then UTType, folder expansion |
-| `Sources/Convert/ProcessRunner.swift` | Async `Process` wrapper: stdout line streaming, stderr tail for errors, terminate on Task cancellation |
+| `Sources/Convert/ProcessRunner.swift` | Async `Process` wrapper: reads both pipes to EOF with `read(2)` on background threads (live progress lines, no lost output), stderr tail for errors, Stop = own cancel flag (ffmpeg exits non-zero on SIGTERM instead of dying from it) |
 | `Resources/Info.plist` | Bundle id `dev.ariel.convert`, `NSServices` (menu item "Convert…", `NSRequiredContext` so it's on by default), document types at `Alternate` rank |
 | `scripts/build.sh` | Build, assemble, sign, install, register (`lsregister`, `pbs -update`) |
 | `scripts/test.sh` | `swift test` with the CLT plugin-path workaround |
@@ -52,7 +53,7 @@ UNIVERSAL=1 VERSION=1.2.0 BUILD_NUMBER=7 ./scripts/build.sh --no-install   # wha
 
 ## Verifying changes
 
-Run `./scripts/test.sh`. New logic gets a test; engine tests write into a `TempDir` and must not need ffmpeg (CI has none). For UI and Finder behaviour, check by hand: build, put sample files in `build/verify/` (git-ignored), right-click › Convert… in Finder, then check the outputs (`file`, `ffprobe`, open the PDF). If the menu item is missing, run `/System/Library/CoreServices/pbs -update` or enable it under System Settings › Keyboard › Keyboard Shortcuts › Services.
+Run `./scripts/test.sh`. New logic gets a test; engine tests write into a `TempDir`. Tests that need ffmpeg go in a suite marked `.enabled(if: ToolLocator.find("ffmpeg") != nil)` (see `VideoConversionTests`), because CI has no ffmpeg; run them locally before merging engine changes. For UI and Finder behaviour, check by hand: build, put sample files in `build/verify/` (git-ignored), right-click › Convert… in Finder, then check the outputs (`file`, `ffprobe`, open the PDF). If the menu item is missing, run `/System/Library/CoreServices/pbs -update` or enable it under System Settings › Keyboard › Keyboard Shortcuts › Services.
 
 ## Conventions
 

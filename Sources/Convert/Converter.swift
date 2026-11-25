@@ -96,7 +96,7 @@ enum FFmpeg {
 
         try await Converter.atomicWrite(to: dest) { tmp in
             var args = ["-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats", "-i", input.path]
-            args += codecArgs(for: format, quality: quality)
+            args += codecArgs(for: format, quality: quality, encoders: await encoders(ffmpeg))
             args += ["-map_metadata", "0", tmp.path]
 
             try await ProcessRunner.run(ffmpeg, args) { line in
@@ -118,7 +118,26 @@ enum FFmpeg {
         return out.flatMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
-    static func codecArgs(for format: OutputFormat, quality: Quality) -> [String] {
+    private static let encoderCache = EncoderCache()
+
+    /// Encoder names this ffmpeg build offers (`ffmpeg -encoders`), cached per binary.
+    /// nil if the list couldn't be read; callers then assume the usual Homebrew encoders.
+    static func encoders(_ ffmpeg: URL) async -> Set<String>? {
+        if let cached = encoderCache.get(ffmpeg) { return cached }
+        guard let out = try? await ProcessRunner.run(ffmpeg, ["-hide_banner", "-encoders"]) else { return nil }
+        // Lines look like " A....D libmp3lame           libmp3lame MP3 (MPEG audio layer 3)".
+        let names = Set(out.split(separator: "\n").compactMap { line -> String? in
+            let cols = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard cols.count >= 2, cols[0].count == 6, cols[0].allSatisfy({ "VASFXBD.".contains($0) }) else { return nil }
+            return String(cols[1])
+        })
+        guard !names.isEmpty else { return nil }
+        encoderCache.set(ffmpeg, names)
+        return names
+    }
+
+    /// `encoders`: what this ffmpeg build offers; nil means unknown (assume the usual ones).
+    static func codecArgs(for format: OutputFormat, quality: Quality, encoders: Set<String>? = nil) -> [String] {
         func pick<T>(_ high: T, _ balanced: T, _ small: T) -> T {
             switch quality { case .high: return high; case .balanced: return balanced; case .small: return small }
         }
@@ -133,7 +152,13 @@ enum FFmpeg {
         case "aiff": return ["-vn", "-c:a", "pcm_s16be"]
         case "flac": return ["-vn", "-c:a", "flac"]
         case "alac": return ["-vn", "-c:a", "alac"]
-        case "ogg":  return ["-vn", "-c:a", "libvorbis", "-q:a", pick("8", "5", "3")]
+        case "ogg":
+            // Homebrew's ffmpeg dropped libvorbis (2025). ffmpeg's own Vorbis encoder is marked
+            // experimental, only takes stereo and mostly ignores quality, but it works.
+            if let encoders, !encoders.contains("libvorbis") {
+                return ["-vn", "-c:a", "vorbis", "-strict", "experimental", "-ac", "2"]
+            }
+            return ["-vn", "-c:a", "libvorbis", "-q:a", pick("8", "5", "3")]
         case "opus": return ["-vn", "-c:a", "libopus", "-b:a", pick("192k", "128k", "64k")]
         case "wma":  return ["-vn", "-c:a", "wmav2", "-b:a", pick("192k", "128k", "96k")]
         case "ac3":  return ["-vn", "-c:a", "ac3", "-b:a", pick("448k", "384k", "192k")]
@@ -156,6 +181,13 @@ enum FFmpeg {
         default: return []
         }
     }
+}
+
+private final class EncoderCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var byPath: [String: Set<String>] = [:]
+    func get(_ url: URL) -> Set<String>? { lock.lock(); defer { lock.unlock() }; return byPath[url.path] }
+    func set(_ url: URL, _ names: Set<String>) { lock.lock(); byPath[url.path] = names; lock.unlock() }
 }
 
 // MARK: - Images

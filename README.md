@@ -26,7 +26,7 @@ Requires macOS 13+ and Xcode Command Line Tools (`xcode-select --install`). Full
 ./scripts/test.sh --filter Markdown  # one suite
 ```
 
-Tests cover the format catalog, input classification and folder expansion, the never-overwrite and atomic-write rules, ffmpeg arguments, the Markdown renderer, the process runner (including cancellation), and real image, PDF and document conversions in a temp folder. None need ffmpeg.
+Tests cover the format catalog, input classification and folder expansion, the never-overwrite and atomic-write rules, ffmpeg arguments, the Markdown renderer, the process runner (including cancellation), and real image, PDF and document conversions in a temp folder. `VideoConversionTests` also run every video and video-to-audio conversion through ffmpeg and check the results with ffprobe; they need Homebrew ffmpeg and are skipped without it (including in CI).
 
 ## Releases
 

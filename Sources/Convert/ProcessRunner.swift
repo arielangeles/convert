@@ -81,40 +81,70 @@ enum ProcessRunner {
         process.standardError = stderr
 
         let buffers = Buffers()
-        stdout.fileHandleForReading.readabilityHandler = { h in
-            let data = h.availableData
-            guard !data.isEmpty else { return }
-            for line in buffers.appendStdout(data) { onStdoutLine?(line) }
-        }
-        stderr.fileHandleForReading.readabilityHandler = { h in
-            let data = h.availableData
-            guard !data.isEmpty else { return }
-            buffers.appendStderr(data)
-        }
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
-                process.terminationHandler = { p in
-                    stdout.fileHandleForReading.readabilityHandler = nil
-                    stderr.fileHandleForReading.readabilityHandler = nil
-                    buffers.appendStderr(stderr.fileHandleForReading.readDataToEndOfFile())
-                    if p.terminationReason == .uncaughtSignal || Task.isCancelled {
+                // Finish only after the process has exited AND both pipes are read to EOF.
+                // (readabilityHandler plus a terminationHandler loses output that arrives just
+                // before exit: ffprobe's whole answer, under load.)
+                let finished = DispatchGroup()
+                finished.enter()
+                process.terminationHandler = { _ in finished.leave() }
+                do {
+                    try process.run()
+                } catch {
+                    cont.resume(throwing: error)
+                    return
+                }
+                drain(stdout.fileHandleForReading, into: finished) { data in
+                    for line in buffers.appendStdout(data) { onStdoutLine?(line) }
+                }
+                drain(stderr.fileHandleForReading, into: finished) { buffers.appendStderr($0) }
+                if Task.isCancelled {
+                    buffers.markCancelled()
+                    process.terminate()
+                }
+
+                finished.notify(queue: .global(qos: .utility)) {
+                    if let last = buffers.flushStdout() { onStdoutLine?(last) }
+                    // ffmpeg catches SIGTERM and exits with an error status rather than dying from
+                    // the signal, so a Stop is recognised by our own flag, not the exit reason.
+                    if buffers.isCancelled {
                         cont.resume(throwing: CancellationError())
-                    } else if p.terminationStatus == 0 {
+                    } else if process.terminationReason == .exit && process.terminationStatus == 0 {
                         cont.resume(returning: buffers.stdoutText)
                     } else {
                         cont.resume(throwing: ConvertError.toolFailed(buffers.stderrTail))
                     }
                 }
-                do {
-                    try process.run()
-                    if Task.isCancelled { process.terminate() }
-                } catch {
-                    cont.resume(throwing: error)
-                }
             }
         } onCancel: {
+            buffers.markCancelled()
             if process.isRunning { process.terminate() }
+        }
+    }
+
+    /// Reads a pipe on a background thread until EOF (the child exited and closed its end).
+    /// Uses read(2), which returns as soon as any bytes arrive, so progress lines stream live.
+    /// (FileHandle.read(upToCount:) waits for the full count, which stalls progress.)
+    private static func drain(_ handle: FileHandle, into group: DispatchGroup,
+                              _ onData: @escaping @Sendable (Data) -> Void) {
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            let fd = handle.fileDescriptor
+            var buffer = [UInt8](repeating: 0, count: 65_536)
+            while true {
+                let n = buffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+                if n > 0 {
+                    onData(Data(buffer[0..<n]))
+                } else if n < 0 && errno == EINTR {
+                    continue
+                } else {
+                    break // 0 = EOF, or a read error
+                }
+            }
+            withExtendedLifetime(handle) {}
+            group.leave()
         }
     }
 
@@ -124,6 +154,24 @@ enum ProcessRunner {
         private var allStdout = Data()
         private var err = Data()
         private let maxErr = 8_192
+        private var cancelled = false
+
+        func markCancelled() {
+            lock.lock(); cancelled = true; lock.unlock()
+        }
+
+        var isCancelled: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return cancelled
+        }
+
+        /// The last stdout line if it had no trailing newline.
+        func flushStdout() -> String? {
+            lock.lock(); defer { lock.unlock() }
+            guard !pending.isEmpty else { return nil }
+            defer { pending.removeAll() }
+            return String(data: pending, encoding: .utf8)
+        }
 
         func appendStdout(_ data: Data) -> [String] {
             lock.lock(); defer { lock.unlock() }
