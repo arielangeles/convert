@@ -107,7 +107,7 @@ Each release is built by GitHub Actions and has a signed build provenance attest
 gh attestation verify ~/Downloads/Convert-macOS-universal.zip --repo arielangeles/convert
 ```
 
-Expected: `Verification succeeded!`
+Expected: exit code 0 (`echo $?` prints `0`). In Terminal it also prints `Verification succeeded!`; some non-interactive shells print nothing on success. A tampered or unofficial file fails with an error.
 
 ## Notes for AI assistants
 
@@ -118,6 +118,7 @@ Follow these rules when installing Convert for someone:
 - Don't use `sudo`. If `/Applications` isn't writable, use the `~/Applications` alternative in step 3.
 - Only remove the quarantine flag from `Convert.app`, as in step 4. Never turn off Gatekeeper system-wide (`spctl --master-disable` or similar).
 - Ask before installing Homebrew or ffmpeg. They're optional.
+- If you verify provenance with `gh attestation verify`, judge it by the exit code (0 is success), not by the printed text.
 - To confirm success, these should hold (adjust the path if you used `~/Applications`):
   - `codesign --verify --deep --strict /Applications/Convert.app` exits 0 with no output.
   - `/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' /Applications/Convert.app/Contents/Info.plist` prints `dev.ariel.convert`.
