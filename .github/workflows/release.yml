@@ -46,8 +46,15 @@ jobs:
           xcodebuild -version
           swift --version
 
+      # Tags cut before the test suite existed (v1.0.0) have no scripts/test.sh. Skip, don't
+      # fail, so they can still be republished with workflow_dispatch.
       - name: Unit tests
-        run: ./scripts/test.sh
+        run: |
+          if [[ -x scripts/test.sh ]]; then
+            ./scripts/test.sh
+          else
+            echo "::warning::$TAG predates the test suite; skipping unit tests."
+          fi
 
       - name: Build universal app
         env:
