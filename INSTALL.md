@@ -9,7 +9,7 @@ Convert adds **Convert…** to the Finder right-click menu so you can change a f
 ## Requirements
 
 - macOS 13 (Ventura) or later, Apple Silicon or Intel. One download works on both.
-- Optional: [Homebrew](https://brew.sh) `ffmpeg` for audio, video and WebP. Images, documents and PDFs work without it.
+- Optional: [Homebrew](https://brew.sh) `ffmpeg` for audio and video, and `webp` for WebP images. Other images, documents and PDFs work without them.
 
 ## Install (Terminal, about a minute)
 
@@ -59,10 +59,10 @@ open /Applications/Convert.app
 
 A Convert window appears. Opening it once is what registers the **Convert…** menu item with Finder.
 
-**6. Optional: add ffmpeg** for audio, video and WebP
+**6. Optional: add ffmpeg and webp** for audio, video and WebP images
 
 ```bash
-brew install ffmpeg
+brew install ffmpeg webp
 ```
 
 ## Use it
@@ -97,6 +97,7 @@ Convert keeps no settings or caches elsewhere.
 | **Convert…** isn't in the right-click menu | Open Convert once, then run `/System/Library/CoreServices/pbs -update`. Still missing: System Settings › Keyboard › Keyboard Shortcuts › Services › Files and Folders, tick **Convert…**. You may need to log out and back in. |
 | "Convert is damaged" or "can't be opened" | Run step 4 again with the path you installed to. |
 | "ffmpeg isn't installed" when converting audio or video | `brew install ffmpeg`, then try again. No need to restart Convert. |
+| "Writing WebP needs the webp tools" | `brew install webp`, then try again. No need to restart Convert. |
 | `curl: (22) ... 404` in step 1 | Check your internet connection, or download from the [Releases page](https://github.com/arielangeles/convert/releases/latest) instead. |
 
 ## Check a download came from this repository (optional)
@@ -117,7 +118,7 @@ Follow these rules when installing Convert for someone:
 - Stop and tell the user if step 2 doesn't print `OK`. Never skip the checksum.
 - Don't use `sudo`. If `/Applications` isn't writable, use the `~/Applications` alternative in step 3.
 - Only remove the quarantine flag from `Convert.app`, as in step 4. Never turn off Gatekeeper system-wide (`spctl --master-disable` or similar).
-- Ask before installing Homebrew or ffmpeg. They're optional.
+- Ask before installing Homebrew, ffmpeg or webp. They're optional.
 - If you verify provenance with `gh attestation verify`, judge it by the exit code (0 is success), not by the printed text.
 - To confirm success, these should hold (adjust the path if you used `~/Applications`):
   - `codesign --verify --deep --strict /Applications/Convert.app` exits 0 with no output.

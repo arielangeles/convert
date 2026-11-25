@@ -13,7 +13,7 @@ Local file converter for macOS. Right-click a file or folder in Finder, choose *
 ## Build
 
 ```bash
-brew install ffmpeg          # needed for audio, video and WebP
+brew install ffmpeg webp     # ffmpeg for audio and video, webp (cwebp) for WebP images
 ./scripts/build.sh           # builds, signs ad-hoc, installs to ~/Applications
 ```
 
@@ -26,7 +26,7 @@ Requires macOS 13+ and Xcode Command Line Tools (`xcode-select --install`). Full
 ./scripts/test.sh --filter Markdown  # one suite
 ```
 
-Tests cover the format catalog, input classification and folder expansion, the never-overwrite and atomic-write rules, ffmpeg arguments, the Markdown renderer, the process runner (including cancellation), and real image, PDF and document conversions in a temp folder. `VideoConversionTests` also run every video and video-to-audio conversion through ffmpeg and check the results with ffprobe; they need Homebrew ffmpeg and are skipped without it (including in CI).
+Tests cover the format catalog, input classification and folder expansion, the never-overwrite and atomic-write rules, ffmpeg arguments, the Markdown renderer, the process runner (including cancellation), and real image, PDF and document conversions in a temp folder. `VideoConversionTests` also run every video and video-to-audio conversion through ffmpeg and check the results with ffprobe; they need Homebrew ffmpeg and are skipped without it (including in CI). `WebPConversionTests` do the same for image to WebP with `cwebp`.
 
 ## Releases
 
@@ -52,7 +52,7 @@ All Actions are pinned to commit SHAs with least-privilege tokens. `security.yml
 |---|---|---|
 | Audio | ffmpeg | MP3, M4A, WAV, AIFF, FLAC, ALAC, OGG, Opus, WMA, AC3 |
 | Video | ffmpeg (HEVC via VideoToolbox) | MP4, MP4 HEVC, MOV, M4V, MKV, WebM, AVI, WMV, GIF, plus any audio format |
-| Images | ImageIO (in-process, keeps metadata) | JPEG, PNG, HEIC, TIFF, GIF, BMP, JPEG 2000, TGA, PSD, ICO, PDF; WebP via ffmpeg |
+| Images | ImageIO (in-process, keeps metadata) | JPEG, PNG, HEIC, TIFF, GIF, BMP, JPEG 2000, TGA, PSD, ICO, PDF; WebP via cwebp (Homebrew `webp`) |
 | Documents (DOCX, DOC, ODT, RTF, HTML, TXT, Markdown) | AppKit text system | DOCX, DOC, ODT, RTF, HTML, TXT, Web Archive, PDF |
 | PDF | PDFKit | PNG/JPEG per page, multi-page TIFF, TXT |
 
