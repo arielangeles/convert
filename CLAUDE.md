@@ -38,7 +38,7 @@ UNIVERSAL=1 VERSION=1.2.0 BUILD_NUMBER=7 ./scripts/build.sh --no-install   # wha
 | `Tests/ConvertTests/` | Swift Testing suites. `TestSupport.swift` has `TempDir` (self-deleting), `png()` fixture, `format(id)` lookup |
 | `.github/workflows/ci.yml` | Tests, universal build + bundle checks on push to main and PRs (macos-15) |
 | `.github/workflows/release.yml` | On `vX.Y.Z` tags or manual dispatch: test, build universal, stamp version, verify, `ditto` zip (versioned + fixed `Convert-macOS-universal.zip`), provenance attestation, `gh release` with SHA-256 |
-| `.github/workflows/security.yml` | actionlint + shellcheck, zizmor, CodeQL (Swift on macos-15, Actions on ubuntu) on PRs, main and weekly |
+| `.github/workflows/security.yml` | actionlint + shellcheck, zizmor, CodeQL (Swift on macos-15, Actions on ubuntu) on PRs, main and weekly. On PRs, CodeQL Swift only runs when `Sources/`, `Tests/`, `Package.*` or `security.yml` change (skipped jobs still satisfy the required check); it takes ~13 min, almost all extractor time in `swift build` |
 | `.github/workflows/scorecard.yml` | OpenSSF Scorecard, results to code scanning |
 | `INSTALL.md` | End-user install guide, also written for AI assistants to follow. Keep its commands in sync with `release.yml` asset names |
 

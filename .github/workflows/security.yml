@@ -59,23 +59,49 @@ jobs:
 
       - uses: zizmorcore/zizmor-action@1b4550e929643b8b26a62303c6bd64814271a4f1 # v0.9.2
 
-  codeql:
-    name: CodeQL (${{ matrix.language }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45 # Swift analysis took 19 min on the first run
+  # CodeQL's Swift extractor spends ~12 minutes extracting Apple's SDK modules, so on pull
+  # requests the Swift scan only runs when Swift code (or this workflow) changed. A job skipped
+  # by its `if:` still satisfies the required "CodeQL (swift)" check. Pushes to main and the
+  # weekly run always scan.
+  changes:
+    name: Detect Swift changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read # list the PR's changed files
+    outputs:
+      swift: ${{ steps.diff.outputs.swift }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" != "pull_request" ]]; then
+            echo "swift=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILES="$(gh api "repos/${REPO}/pulls/${PR}/files" --paginate -q '.[].filename')"
+          printf '%s\n' "$FILES"
+          if grep -qE '^(Sources/|Tests/|Package\.(swift|resolved)$|\.github/workflows/security\.yml$)' <<<"$FILES"; then
+            echo "swift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "swift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  codeql-swift:
+    name: CodeQL (swift)
+    needs: changes
+    # Run unless the diff check positively said "no Swift changes": if that job fails, scan anyway.
+    if: ${{ !cancelled() && needs.changes.outputs.swift != 'false' }}
+    runs-on: macos-15
+    timeout-minutes: 45
     permissions:
       contents: read
       security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - language: swift
-            os: macos-15
-            build-mode: manual
-          - language: actions
-            os: ubuntu-latest
-            build-mode: none
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,14 +109,38 @@ jobs:
 
       - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
+          languages: swift
+          build-mode: manual
           queries: security-extended
 
+      # Debug, not release: release's whole-module build is one big compiler job, and the
+      # extractor ran ~25% slower on it (1012s vs 727s). Optimization level doesn't change
+      # what CodeQL sees.
       - name: Build
-        if: matrix.build-mode == 'manual'
-        run: swift build -c release
+        run: swift build
 
       - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
-          category: /language:${{ matrix.language }}
+          category: /language:swift
+
+  codeql-actions:
+    name: CodeQL (actions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          languages: actions
+          build-mode: none
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          category: /language:actions
