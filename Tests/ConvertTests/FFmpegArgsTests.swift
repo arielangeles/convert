@@ -37,6 +37,18 @@ import Testing
         #expect(args.last == "0" && args.dropLast().last == "-loop")
     }
 
+    @Test func oggUsesLibvorbisWhenAvailable() {
+        let args = FFmpeg.codecArgs(for: format("ogg"), quality: .high, encoders: ["libvorbis", "vorbis"])
+        #expect(args == ["-vn", "-c:a", "libvorbis", "-q:a", "8"])
+        // Unknown encoder list: assume a full build.
+        #expect(FFmpeg.codecArgs(for: format("ogg"), quality: .high).contains("libvorbis"))
+    }
+
+    @Test func oggFallsBackToNativeStereoVorbisWithoutLibvorbis() {
+        let args = FFmpeg.codecArgs(for: format("ogg"), quality: .balanced, encoders: ["vorbis", "libopus"])
+        #expect(args == ["-vn", "-c:a", "vorbis", "-strict", "experimental", "-ac", "2"])
+    }
+
     @Test func nonMediaFormatsGetNoArgs() {
         #expect(FFmpeg.codecArgs(for: format("png"), quality: .balanced).isEmpty)
     }
