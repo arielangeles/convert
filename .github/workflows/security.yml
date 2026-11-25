@@ -62,7 +62,7 @@ jobs:
   codeql:
     name: CodeQL (${{ matrix.language }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45 # Swift analysis took 19 min on the first run
     permissions:
       contents: read
       security-events: write
