@@ -207,14 +207,13 @@ enum ImageConverter {
             return dest
         }
 
-        // Prefer ImageIO (in-process, keeps metadata). Fall back to ffmpeg for formats
-        // ImageIO can't write on this macOS version (WebP on most).
-        if let type = utTypes[format.id], canWrite(type) {
-            try Converter.atomicWriteSync(to: dest) { tmp in try writeWithImageIO(input, tmp, type: type, quality: quality) }
+        if format.id == "webp" {
+            try await writeWebP(input, dest, quality: quality)
             return dest
         }
-        if format.id == "webp" {
-            try await Converter.atomicWrite(to: dest) { tmp in try await webpViaFFmpeg(input, tmp, quality: quality) }
+        // ImageIO: in-process, keeps metadata.
+        if let type = utTypes[format.id], canWrite(type) {
+            try Converter.atomicWriteSync(to: dest) { tmp in try writeWithImageIO(input, tmp, type: type, quality: quality) }
             return dest
         }
         throw ConvertError.unsupported("This Mac can't write \(format.label) images.")
@@ -260,15 +259,60 @@ enum ImageConverter {
         guard doc.write(to: output) else { throw ConvertError.toolFailed("Couldn't write PDF.") }
     }
 
-    private static func webpViaFFmpeg(_ input: URL, _ output: URL, quality: Quality) async throws {
-        guard let ffmpeg = ToolLocator.find("ffmpeg") else { throw ConvertError.ffmpegMissing }
-        // ffmpeg's HEIC support is patchy, so decode with ImageIO first.
+    /// How a WebP file gets written. ImageIO can't write WebP on most macOS versions, and
+    /// Homebrew's ffmpeg (9.x) is built without libwebp, so `cwebp` (Homebrew `webp`) is the usual path.
+    enum WebPBackend: Equatable {
+        case imageIO
+        case ffmpeg(URL)
+        case cwebp(URL)
+    }
+
+    /// Picks the first WebP writer this Mac has: ImageIO, then ffmpeg with libwebp, then cwebp.
+    /// `ffmpegEncoders` nil means the list couldn't be read; then cwebp wins and ffmpeg is a last try.
+    static func webpBackend(imageIOCanWrite: Bool, ffmpeg: URL?, ffmpegEncoders: Set<String>?,
+                            cwebp: URL?) -> WebPBackend? {
+        if imageIOCanWrite { return .imageIO }
+        if let ffmpeg, ffmpegEncoders?.contains("libwebp") == true { return .ffmpeg(ffmpeg) }
+        if let cwebp { return .cwebp(cwebp) }
+        if let ffmpeg, ffmpegEncoders == nil { return .ffmpeg(ffmpeg) }
+        return nil
+    }
+
+    private static func writeWebP(_ input: URL, _ dest: URL, quality: Quality) async throws {
+        let ffmpeg = ToolLocator.find("ffmpeg")
+        let encoders: Set<String>? = if let ffmpeg { await FFmpeg.encoders(ffmpeg) } else { nil }
+        let backend = webpBackend(imageIOCanWrite: canWrite(.webP), ffmpeg: ffmpeg, ffmpegEncoders: encoders,
+                                  cwebp: ToolLocator.find("cwebp"))
+        let q: String = { switch quality { case .high: return "90"; case .balanced: return "80"; case .small: return "65" } }()
+
+        switch backend {
+        case .imageIO:
+            try Converter.atomicWriteSync(to: dest) { tmp in try writeWithImageIO(input, tmp, type: .webP, quality: quality) }
+        case .ffmpeg(let ffmpeg):
+            try await Converter.atomicWrite(to: dest) { tmp in
+                try await viaPNG(input) { png in
+                    try await ProcessRunner.run(ffmpeg, ["-hide_banner", "-nostdin", "-y", "-i", png.path,
+                                                         "-c:v", "libwebp", "-quality", q, "-f", "webp", tmp.path])
+                }
+            }
+        case .cwebp(let cwebp):
+            try await Converter.atomicWrite(to: dest) { tmp in
+                try await viaPNG(input) { png in
+                    try await ProcessRunner.run(cwebp, ["-quiet", "-q", q, "-metadata", "icc", png.path, "-o", tmp.path])
+                }
+            }
+        case nil:
+            throw ConvertError.unsupported("Writing WebP needs the webp tools. Run `brew install webp` in Terminal, then try again.")
+        }
+    }
+
+    /// External encoders handle HEIC and other Apple formats poorly, so decode with ImageIO
+    /// into a temporary PNG first and hand them that.
+    private static func viaPNG(_ input: URL, _ body: (URL) async throws -> Void) async throws {
         let staging = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
         defer { try? FileManager.default.removeItem(at: staging) }
         try writeWithImageIO(input, staging, type: .png, quality: .high)
-        let q: String = { switch quality { case .high: return "90"; case .balanced: return "80"; case .small: return "65" } }()
-        try await ProcessRunner.run(ffmpeg, ["-hide_banner", "-nostdin", "-y", "-i", staging.path,
-                                             "-c:v", "libwebp", "-quality", q, "-f", "webp", output.path])
+        try await body(staging)
     }
 }
 
